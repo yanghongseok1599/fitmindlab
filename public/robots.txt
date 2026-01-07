@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://fitmindlab.kr/sitemap.xml
