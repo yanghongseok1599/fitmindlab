@@ -1,26 +1,53 @@
 "use client";
 
-import { signIn, useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, Suspense } from "react";
+import { useEffect, useState, Suspense } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ArrowLeft, Loader2 } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
 
 function LoginContent() {
-  const { data: session, status } = useSession();
   const router = useRouter();
   const searchParams = useSearchParams();
   const callbackUrl = searchParams.get("callbackUrl") || "/select-role";
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const supabase = createClient();
 
   useEffect(() => {
-    if (session) {
-      router.push(callbackUrl);
-    }
-  }, [session, router, callbackUrl]);
+    const checkSession = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        router.push(callbackUrl);
+      } else {
+        setLoading(false);
+      }
+    };
+    checkSession();
+  }, [supabase, router, callbackUrl]);
 
-  if (status === "loading") {
+  useEffect(() => {
+    const errorParam = searchParams.get("error");
+    if (errorParam === "auth") {
+      setError("로그인에 실패했습니다. 다시 시도해주세요.");
+    }
+  }, [searchParams]);
+
+  const handleOAuthLogin = async (provider: "kakao" | "google") => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(callbackUrl)}`,
+      },
+    });
+    if (error) {
+      setError("로그인 중 오류가 발생했습니다.");
+    }
+  };
+
+  if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-violet-600" />
@@ -49,10 +76,16 @@ function LoginContent() {
                 </p>
               </div>
 
+              {error && (
+                <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600 text-center">
+                  {error}
+                </div>
+              )}
+
               <div className="space-y-4">
                 {/* Google Login */}
                 <Button
-                  onClick={() => signIn("google", { callbackUrl })}
+                  onClick={() => handleOAuthLogin("google")}
                   variant="outline"
                   className="w-full py-6 text-base font-medium border-2 hover:bg-slate-50"
                 >
@@ -79,7 +112,7 @@ function LoginContent() {
 
                 {/* Kakao Login */}
                 <Button
-                  onClick={() => signIn("kakao", { callbackUrl })}
+                  onClick={() => handleOAuthLogin("kakao")}
                   className="w-full py-6 text-base font-medium"
                   style={{ backgroundColor: "#FEE500", color: "#000000" }}
                 >

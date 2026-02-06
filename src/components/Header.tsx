@@ -1,8 +1,9 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { useSession, signOut } from "next-auth/react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -11,9 +12,38 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { User, LogOut, ChevronDown } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
+import type { User as SupabaseUser } from "@supabase/supabase-js";
 
 export default function Header() {
-  const { data: session, status } = useSession();
+  const [user, setUser] = useState<SupabaseUser | null>(null);
+  const [loading, setLoading] = useState(true);
+  const router = useRouter();
+  const supabase = createClient();
+
+  useEffect(() => {
+    const getUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      setUser(user);
+      setLoading(false);
+    };
+    getUser();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => subscription.unsubscribe();
+  }, [supabase]);
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    router.push("/");
+    router.refresh();
+  };
+
+  const userName = user?.user_metadata?.full_name || user?.user_metadata?.name || "사용자";
+  const userImage = user?.user_metadata?.avatar_url || user?.user_metadata?.picture;
 
   return (
     <header className="fixed top-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-md border-b border-slate-200">
@@ -28,15 +58,15 @@ export default function Header() {
 
           {/* Auth Buttons */}
           <div className="flex items-center gap-4">
-            {status === "loading" ? (
+            {loading ? (
               <div className="w-8 h-8 rounded-full bg-slate-200 animate-pulse" />
-            ) : session ? (
+            ) : user ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" className="flex items-center gap-2">
-                    {session.user?.image ? (
+                    {userImage ? (
                       <Image
-                        src={session.user.image}
+                        src={userImage}
                         alt="Profile"
                         width={32}
                         height={32}
@@ -48,7 +78,7 @@ export default function Header() {
                       </div>
                     )}
                     <span className="hidden sm:inline text-sm font-medium">
-                      {session.user?.name?.split(" ")[0] || "사용자"}
+                      {userName.split(" ")[0]}
                     </span>
                     <ChevronDown className="w-4 h-4 text-slate-500" />
                   </Button>
@@ -61,7 +91,7 @@ export default function Header() {
                     </Link>
                   </DropdownMenuItem>
                   <DropdownMenuItem
-                    onClick={() => signOut({ callbackUrl: "/" })}
+                    onClick={handleSignOut}
                     className="cursor-pointer text-red-600"
                   >
                     <LogOut className="w-4 h-4 mr-2" />

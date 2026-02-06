@@ -1,6 +1,5 @@
 "use client";
 
-import { useSession, signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -21,6 +20,8 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { ROLE_LABELS, Role, FitnessTypeCode } from "@/types";
+import { createClient } from "@/lib/supabase/client";
+import type { User as SupabaseUser } from "@supabase/supabase-js";
 
 interface TestHistory {
   id: string;
@@ -44,15 +45,24 @@ const TYPE_IMAGES: Record<FitnessTypeCode, string> = {
 };
 
 export default function MyPage() {
-  const { data: session, status } = useSession();
   const router = useRouter();
+  const [user, setUser] = useState<SupabaseUser | null>(null);
+  const [loading, setLoading] = useState(true);
   const [testHistory, setTestHistory] = useState<TestHistory[]>([]);
+  const supabase = createClient();
 
   useEffect(() => {
-    if (status === "unauthenticated") {
-      router.push("/login");
-    }
-  }, [status, router]);
+    const getUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        router.push("/login");
+      } else {
+        setUser(user);
+        setLoading(false);
+      }
+    };
+    getUser();
+  }, [supabase, router]);
 
   useEffect(() => {
     // localStorage에서 검사 이력 불러오기
@@ -60,7 +70,6 @@ export default function MyPage() {
       const history: TestHistory[] = [];
 
       // 무료 검사 결과 확인
-      const freeResponses = localStorage.getItem("freeAssessmentResponses");
       const freeRole = localStorage.getItem("freeAssessmentRole") as Role | null;
       const freeResult = localStorage.getItem("freeAssessmentResult");
 
@@ -105,12 +114,18 @@ export default function MyPage() {
       setTestHistory(history);
     };
 
-    if (session) {
+    if (user) {
       loadTestHistory();
     }
-  }, [session]);
+  }, [user]);
 
-  if (status === "loading") {
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    router.push("/");
+    router.refresh();
+  };
+
+  if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-violet-600" />
@@ -118,9 +133,13 @@ export default function MyPage() {
     );
   }
 
-  if (!session) {
+  if (!user) {
     return null;
   }
+
+  const userName = user.user_metadata?.full_name || user.user_metadata?.name || "사용자";
+  const userEmail = user.email;
+  const userImage = user.user_metadata?.avatar_url || user.user_metadata?.picture;
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-slate-50 to-white py-8 md:py-16">
@@ -137,9 +156,9 @@ export default function MyPage() {
             <CardContent className="p-8">
               <div className="flex items-center gap-6">
                 <div className="relative">
-                  {session.user?.image ? (
+                  {userImage ? (
                     <Image
-                      src={session.user.image}
+                      src={userImage}
                       alt="Profile"
                       width={80}
                       height={80}
@@ -153,13 +172,13 @@ export default function MyPage() {
                 </div>
                 <div className="flex-1">
                   <h1 className="text-2xl font-bold text-slate-900 mb-1">
-                    {session.user?.name || "사용자"}
+                    {userName}
                   </h1>
-                  <p className="text-slate-500 text-sm mb-3">{session.user?.email}</p>
+                  <p className="text-slate-500 text-sm mb-3">{userEmail}</p>
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => signOut({ callbackUrl: "/" })}
+                    onClick={handleSignOut}
                     className="text-red-600 border-red-200 hover:bg-red-50"
                   >
                     <LogOut className="w-4 h-4 mr-2" />
