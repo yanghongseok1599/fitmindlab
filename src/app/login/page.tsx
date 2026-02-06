@@ -36,11 +36,18 @@ function LoginContent() {
   }, [searchParams]);
 
   const handleOAuthLogin = async (provider: "kakao" | "google") => {
+    const options: { redirectTo: string; scopes?: string } = {
+      redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(callbackUrl)}`,
+    };
+
+    // 카카오는 비즈앱이 아니면 account_email 권한이 없으므로 제외
+    if (provider === "kakao") {
+      options.scopes = "profile_nickname profile_image";
+    }
+
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
-      options: {
-        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(callbackUrl)}`,
-      },
+      options,
     });
     if (error) {
       setError("로그인 중 오류가 발생했습니다.");
