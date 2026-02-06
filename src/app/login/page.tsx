@@ -36,18 +36,23 @@ function LoginContent() {
   }, [searchParams]);
 
   const handleOAuthLogin = async (provider: "kakao" | "google") => {
-    const options: { redirectTo: string; scopes?: string } = {
-      redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(callbackUrl)}`,
-    };
-
-    // 카카오는 비즈앱이 아니면 account_email 권한이 없으므로 제외
     if (provider === "kakao") {
-      options.scopes = "profile_nickname profile_image";
+      // 카카오는 Supabase를 우회하여 직접 로그인 (account_email scope 제외)
+      const kakaoClientId = "776bf3f1f78decd3b20fbcf4c544641c";
+      const redirectUri = `${window.location.origin}/auth/kakao/callback`;
+      const scope = "profile_nickname profile_image";
+      const state = encodeURIComponent(callbackUrl);
+
+      window.location.href = `https://kauth.kakao.com/oauth/authorize?client_id=${kakaoClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${scope}&state=${state}`;
+      return;
     }
 
+    // Google은 Supabase OAuth 사용
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
-      options,
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(callbackUrl)}`,
+      },
     });
     if (error) {
       setError("로그인 중 오류가 발생했습니다.");
