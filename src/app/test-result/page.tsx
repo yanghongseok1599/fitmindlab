@@ -2,68 +2,134 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { Response } from "@/types";
 
-// 힐링마스터 유형이 나오는 테스트용 목업 데이터
-// 조건: TOP5에 공감(22) + (성장지원(21) 또는 긍정(26)) + 관계형성 도메인 2개 이상
-const mockResponses = [
-  // 핵심 키워드 - 높은 점수
-  { questionId: 1, keywordId: 22, type: "A", score: 5 },  // 공감 (relationship) - 필수
-  { questionId: 2, keywordId: 26, type: "A", score: 5 },  // 긍정 (relationship) - 필수
-  { questionId: 3, keywordId: 21, type: "A", score: 5 },  // 성장지원 (relationship)
-  { questionId: 4, keywordId: 24, type: "A", score: 5 },  // 포용 (relationship)
-  { questionId: 5, keywordId: 27, type: "A", score: 4 },  // 관계 (relationship)
-  // 나머지 - 중간 점수
-  { questionId: 6, keywordId: 19, type: "A", score: 3 },  // 적응
-  { questionId: 7, keywordId: 20, type: "A", score: 3 },  // 연결성
-  { questionId: 8, keywordId: 23, type: "A", score: 3 },  // 화합
-  { questionId: 9, keywordId: 25, type: "A", score: 3 },  // 개별화
-  { questionId: 10, keywordId: 1, type: "A", score: 2 },  // 성취
-  { questionId: 11, keywordId: 2, type: "A", score: 2 },  // 정리
-  { questionId: 12, keywordId: 3, type: "A", score: 2 },  // 신념
-  { questionId: 13, keywordId: 4, type: "A", score: 2 },  // 일관성
-  { questionId: 14, keywordId: 5, type: "A", score: 2 },  // 심사숙고
-  { questionId: 15, keywordId: 6, type: "A", score: 2 },  // 체계
-  { questionId: 16, keywordId: 7, type: "A", score: 2 },  // 집중
-  { questionId: 17, keywordId: 8, type: "A", score: 2 },  // 책임
-  { questionId: 18, keywordId: 9, type: "A", score: 2 },  // 복구
-  { questionId: 19, keywordId: 10, type: "A", score: 2 }, // 활성화
-  { questionId: 20, keywordId: 11, type: "A", score: 2 }, // 주도력
-  { questionId: 21, keywordId: 12, type: "A", score: 2 }, // 소통
-  { questionId: 22, keywordId: 13, type: "A", score: 2 }, // 경쟁
-  { questionId: 23, keywordId: 14, type: "A", score: 2 }, // 최상화
-  { questionId: 24, keywordId: 15, type: "A", score: 2 }, // 자기확신
-  { questionId: 25, keywordId: 16, type: "A", score: 2 }, // 존재감
-  { questionId: 26, keywordId: 17, type: "A", score: 2 }, // 사교성
-  { questionId: 27, keywordId: 18, type: "A", score: 2 }, // 설득
-  { questionId: 28, keywordId: 28, type: "A", score: 2 }, // 분석
-  { questionId: 29, keywordId: 29, type: "A", score: 2 }, // 맥락
-  { questionId: 30, keywordId: 30, type: "A", score: 2 }, // 미래지향
-  { questionId: 31, keywordId: 31, type: "A", score: 2 }, // 발상
-  { questionId: 32, keywordId: 32, type: "A", score: 2 }, // 수집
-  { questionId: 33, keywordId: 33, type: "A", score: 2 }, // 지적사고
-  { questionId: 34, keywordId: 34, type: "A", score: 2 }, // 배움
-  { questionId: 35, keywordId: 35, type: "A", score: 2 }, // 전략
-  { questionId: 36, keywordId: 36, type: "A", score: 2 }, // 비전제시
+// 테스트용 목업 데이터 - 비전형(전략사고 도메인 1위) + 대표 → 제국 건설자
+const mockResponses: Response[] = [
+  // ===== 전략사고 (Thinking) - 최고 점수 (비전형이 나오도록) =====
+  // vision (core=3문항)
+  { questionId: 'vision_A', themeId: 'vision', questionType: 'A', score: 5 },
+  { questionId: 'vision_B', themeId: 'vision', questionType: 'B', score: 5 },
+  { questionId: 'vision_C', themeId: 'vision', questionType: 'C', score: 5 },
+  // strategy (core=3문항)
+  { questionId: 'strategy_A', themeId: 'strategy', questionType: 'A', score: 5 },
+  { questionId: 'strategy_B', themeId: 'strategy', questionType: 'B', score: 5 },
+  { questionId: 'strategy_C', themeId: 'strategy', questionType: 'C', score: 4 },
+  // analysis (standard=2문항)
+  { questionId: 'analysis_A', themeId: 'analysis', questionType: 'A', score: 5 },
+  { questionId: 'analysis_B', themeId: 'analysis', questionType: 'B', score: 4 },
+  // ideation (core=3문항)
+  { questionId: 'ideation_A', themeId: 'ideation', questionType: 'A', score: 5 },
+  { questionId: 'ideation_B', themeId: 'ideation', questionType: 'B', score: 5 },
+  { questionId: 'ideation_C', themeId: 'ideation', questionType: 'C', score: 4 },
+  // input (standard=2문항)
+  { questionId: 'input_A', themeId: 'input', questionType: 'A', score: 4 },
+  { questionId: 'input_B', themeId: 'input', questionType: 'B', score: 4 },
+  // intellection (standard=2문항)
+  { questionId: 'intellection_A', themeId: 'intellection', questionType: 'A', score: 4 },
+  { questionId: 'intellection_B', themeId: 'intellection', questionType: 'B', score: 4 },
+
+  // ===== 실행력 (Executing) - 중간 점수 =====
+  // execution (core=3문항)
+  { questionId: 'execution_A', themeId: 'execution', questionType: 'A', score: 4 },
+  { questionId: 'execution_B', themeId: 'execution', questionType: 'B', score: 3 },
+  { questionId: 'execution_C', themeId: 'execution', questionType: 'C', score: 3 },
+  // focus (standard=2문항)
+  { questionId: 'focus_A', themeId: 'focus', questionType: 'A', score: 3 },
+  { questionId: 'focus_B', themeId: 'focus', questionType: 'B', score: 3 },
+  // discipline (light=1문항)
+  { questionId: 'discipline_A', themeId: 'discipline', questionType: 'A', score: 3 },
+  // arranger (standard=2문항)
+  { questionId: 'arranger_A', themeId: 'arranger', questionType: 'A', score: 3 },
+  { questionId: 'arranger_B', themeId: 'arranger', questionType: 'B', score: 2 },
+  // completion (standard=2문항)
+  { questionId: 'completion_A', themeId: 'completion', questionType: 'A', score: 3 },
+  { questionId: 'completion_B', themeId: 'completion', questionType: 'B', score: 2 },
+  // deliberative (standard=2문항)
+  { questionId: 'deliberative_A', themeId: 'deliberative', questionType: 'A', score: 2 },
+  { questionId: 'deliberative_B', themeId: 'deliberative', questionType: 'B', score: 2 },
+  // restorative (standard=2문항)
+  { questionId: 'restorative_A', themeId: 'restorative', questionType: 'A', score: 2 },
+  { questionId: 'restorative_B', themeId: 'restorative', questionType: 'B', score: 2 },
+  // adaptability (standard=2문항)
+  { questionId: 'adaptability_A', themeId: 'adaptability', questionType: 'A', score: 2 },
+  { questionId: 'adaptability_B', themeId: 'adaptability', questionType: 'B', score: 2 },
+
+  // ===== 영향력 (Influencing) - 중하 점수 =====
+  // maximizer (core=3문항)
+  { questionId: 'maximizer_A', themeId: 'maximizer', questionType: 'A', score: 3 },
+  { questionId: 'maximizer_B', themeId: 'maximizer', questionType: 'B', score: 3 },
+  { questionId: 'maximizer_C', themeId: 'maximizer', questionType: 'C', score: 2 },
+  // command (core=3문항)
+  { questionId: 'command_A', themeId: 'command', questionType: 'A', score: 3 },
+  { questionId: 'command_B', themeId: 'command', questionType: 'B', score: 2 },
+  { questionId: 'command_C', themeId: 'command', questionType: 'C', score: 2 },
+  // selfAssurance (core=3문항)
+  { questionId: 'selfAssurance_A', themeId: 'selfAssurance', questionType: 'A', score: 3 },
+  { questionId: 'selfAssurance_B', themeId: 'selfAssurance', questionType: 'B', score: 2 },
+  { questionId: 'selfAssurance_C', themeId: 'selfAssurance', questionType: 'C', score: 2 },
+  // influence (core=3문항)
+  { questionId: 'influence_A', themeId: 'influence', questionType: 'A', score: 3 },
+  { questionId: 'influence_B', themeId: 'influence', questionType: 'B', score: 2 },
+  { questionId: 'influence_C', themeId: 'influence', questionType: 'C', score: 2 },
+  // communication (standard=2문항)
+  { questionId: 'communication_A', themeId: 'communication', questionType: 'A', score: 3 },
+  { questionId: 'communication_B', themeId: 'communication', questionType: 'B', score: 2 },
+  // activator (core=3문항)
+  { questionId: 'activator_A', themeId: 'activator', questionType: 'A', score: 2 },
+  { questionId: 'activator_B', themeId: 'activator', questionType: 'B', score: 2 },
+  { questionId: 'activator_C', themeId: 'activator', questionType: 'C', score: 2 },
+
+  // ===== 관계 구축 (Relationship) - 낮은 점수 =====
+  // empathy (standard=2문항)
+  { questionId: 'empathy_A', themeId: 'empathy', questionType: 'A', score: 2 },
+  { questionId: 'empathy_B', themeId: 'empathy', questionType: 'B', score: 2 },
+  // individualization (standard=2문항)
+  { questionId: 'individualization_A', themeId: 'individualization', questionType: 'A', score: 2 },
+  { questionId: 'individualization_B', themeId: 'individualization', questionType: 'B', score: 2 },
+  // relator (light=1문항)
+  { questionId: 'relator_A', themeId: 'relator', questionType: 'A', score: 2 },
+  // harmony (light=1문항)
+  { questionId: 'harmony_A', themeId: 'harmony', questionType: 'A', score: 2 },
+  // connectedness (standard=2문항)
+  { questionId: 'connectedness_A', themeId: 'connectedness', questionType: 'A', score: 2 },
+  { questionId: 'connectedness_B', themeId: 'connectedness', questionType: 'B', score: 2 },
+  // includer (light=1문항)
+  { questionId: 'includer_A', themeId: 'includer', questionType: 'A', score: 2 },
+  // positivity (standard=2문항)
+  { questionId: 'positivity_A', themeId: 'positivity', questionType: 'A', score: 2 },
+  { questionId: 'positivity_B', themeId: 'positivity', questionType: 'B', score: 2 },
+  // developer (core=3문항)
+  { questionId: 'developer_A', themeId: 'developer', questionType: 'A', score: 3 },
+  { questionId: 'developer_B', themeId: 'developer', questionType: 'B', score: 2 },
+  { questionId: 'developer_C', themeId: 'developer', questionType: 'C', score: 2 },
+  // belief (core=3문항)
+  { questionId: 'belief_A', themeId: 'belief', questionType: 'A', score: 2 },
+  { questionId: 'belief_B', themeId: 'belief', questionType: 'B', score: 2 },
+  { questionId: 'belief_C', themeId: 'belief', questionType: 'C', score: 2 },
+  // fairness (light=1문항)
+  { questionId: 'fairness_A', themeId: 'fairness', questionType: 'A', score: 2 },
+
+  // ===== 보완 문항 =====
+  { questionId: 'S1', themeId: 'vision', questionType: 'A', score: 5, isSupplementary: true },
+  { questionId: 'S2', themeId: 'vision', questionType: 'A', score: 4, isSupplementary: true },
+  { questionId: 'S3', themeId: 'vision', questionType: 'A', score: 4, isSupplementary: true },
+  { questionId: 'S4', themeId: 'vision', questionType: 'A', score: 3, isSupplementary: true },
 ];
 
 export default function TestResultPage() {
   const router = useRouter();
 
   useEffect(() => {
-    // 프리미엄 결제 상태 설정
     sessionStorage.setItem("premiumPaid", "true");
-
-    // 테스트 데이터를 sessionStorage에 저장 (프리미엄용)
-    sessionStorage.setItem("premiumResponses", JSON.stringify(mockResponses));
-    sessionStorage.setItem("premiumRole", "manager"); // manager, operator, trainer 중 선택
-
-    // 프리미엄 결과 페이지로 리다이렉트
-    router.push("/premium-results");
+    sessionStorage.setItem("assessmentResponses", JSON.stringify(mockResponses));
+    sessionStorage.setItem("assessmentRole", "ceo");
+    router.push("/results");
   }, [router]);
 
   return (
     <div className="min-h-screen flex items-center justify-center">
-      <p className="text-slate-600">프리미엄 결과 페이지로 이동 중...</p>
+      <p className="text-slate-600">FC 결과 페이지로 이동 중...</p>
     </div>
   );
 }

@@ -1,199 +1,317 @@
-import { keywords, getKeywordById } from '@/data/keywords';
-import { fitnessTypes } from '@/data/fitness-types';
 import {
-  Response,
-  KeywordScore,
-  DomainScore,
-  Domain,
-  FitnessType,
-  FitnessTypeCode,
-  Role,
-  DOMAIN_INFO,
+  Role, ThemeId, ThemeScore, DomainScore, Grade, Domain,
+  LeadershipTypeId, LeadershipResult, WeightLevel,
+  FreeResult, FullAssessmentResult,
+  Response, RoleSubTypeResult, RoleSpecificResult,
 } from '@/types';
+import { THEME_MAP } from '@/data/themes';
+import { ROLE_THEME_WEIGHTS, getMaxScore } from '@/data/role-weights';
+import { LEADERSHIP_TYPES, getLeadershipCombo } from '@/data/leadership-types';
 
-// 키워드별 점수 계산
-export function calculateKeywordScores(responses: Response[]): KeywordScore[] {
-  const scoreMap = new Map<number, number[]>();
-
-  // 키워드별로 점수 그룹화
-  responses.forEach((response) => {
-    const scores = scoreMap.get(response.keywordId) || [];
-    scores.push(response.score);
-    scoreMap.set(response.keywordId, scores);
-  });
-
-  // 각 키워드별 평균 점수 계산
-  const keywordScores: KeywordScore[] = [];
-  scoreMap.forEach((scores, keywordId) => {
-    const keyword = getKeywordById(keywordId);
-    if (keyword) {
-      const avgScore = scores.reduce((a, b) => a + b, 0) / scores.length;
-      keywordScores.push({
-        keywordId,
-        keyword,
-        score: Math.round(avgScore * 100) / 100,
-      });
-    }
-  });
-
-  // 점수 내림차순 정렬
-  return keywordScores.sort((a, b) => b.score - a.score);
+// ===== 등급 판정 =====
+export function getGrade(score: number): Grade {
+  if (score >= 90) return 'S';
+  if (score >= 75) return 'A';
+  if (score >= 55) return 'B';
+  if (score >= 35) return 'C';
+  if (score >= 20) return 'D';
+  return 'E';
 }
 
-// 도메인별 점수 계산
-export function calculateDomainScores(keywordScores: KeywordScore[]): DomainScore[] {
-  const domainScoreMap: Record<Domain, number[]> = {
-    executing: [],
-    influencing: [],
-    relationship: [],
-    thinking: [],
+export const GRADE_INFO: Record<Grade, { label: string; color: string; bgColor: string }> = {
+  S: { label: '이 역할에서 가장 강력한 무기', color: '#DC2626', bgColor: 'bg-red-500' },
+  A: { label: '자주 발휘되는 핵심 강점', color: '#F97316', bgColor: 'bg-orange-500' },
+  B: { label: '상황에 따라 발휘되는 강점', color: '#EAB308', bgColor: 'bg-yellow-500' },
+  C: { label: '개발 가능한 영역', color: '#22C55E', bgColor: 'bg-green-500' },
+  D: { label: '에너지를 많이 쓰는 영역', color: '#3B82F6', bgColor: 'bg-blue-500' },
+  E: { label: '주의가 필요한 맹점', color: '#6B7280', bgColor: 'bg-gray-500' },
+};
+
+// ===== STEP 1: 테마별 점수 계산 =====
+export function calculateThemeScores(
+  role: Role,
+  responses: Response[],
+): ThemeScore[] {
+  const weights = ROLE_THEME_WEIGHTS[role];
+  const themeScores: ThemeScore[] = [];
+
+  // 테마별 응답 그룹화 (보완 문항 제외)
+  const responsesByTheme = new Map<ThemeId, number[]>();
+  for (const r of responses) {
+    if (r.isSupplementary) continue;
+    const scores = responsesByTheme.get(r.themeId) || [];
+    scores.push(r.score);
+    responsesByTheme.set(r.themeId, scores);
+  }
+
+  // 각 테마 점수 계산
+  for (const [themeId, weight] of Object.entries(weights) as [ThemeId, WeightLevel][]) {
+    if (weight === 'excluded') continue;
+
+    const theme = THEME_MAP[themeId];
+    if (!theme) continue;
+
+    const scores = responsesByTheme.get(themeId) || [];
+    const rawScore = scores.reduce((sum, s) => sum + s, 0);
+    const maxPossible = getMaxScore(weight);
+    const standardizedScore = maxPossible > 0
+      ? Math.round((rawScore / maxPossible) * 100)
+      : 0;
+
+    themeScores.push({
+      themeId,
+      nameKo: theme.nameKo,
+      domain: theme.domain,
+      rawScore,
+      maxPossible,
+      standardizedScore: Math.min(standardizedScore, 100),
+      grade: getGrade(Math.min(standardizedScore, 100)),
+      weight,
+    });
+  }
+
+  // 랭킹용 보정 점수: light(1문항)는 신뢰도가 낮으므로 페널티 적용
+  // 표시 점수(standardizedScore)는 그대로 유지, 정렬에만 영향
+  const reliabilityBonus = (w: WeightLevel): number => {
+    switch (w) {
+      case 'core': return 3;      // 3문항 → +3점 보너스
+      case 'standard': return 1;  // 2문항 → +1점 보너스
+      case 'light': return -5;    // 1문항 → -5점 페널티
+      default: return 0;
+    }
   };
 
-  // 도메인별로 점수 그룹화
-  keywordScores.forEach((ks) => {
-    domainScoreMap[ks.keyword.domain].push(ks.score);
+  return themeScores.sort((a, b) => {
+    const aRank = a.standardizedScore + reliabilityBonus(a.weight);
+    const bRank = b.standardizedScore + reliabilityBonus(b.weight);
+    if (bRank !== aRank) return bRank - aRank;
+    // 동점 시 문항 수가 많은 테마 우선
+    return b.maxPossible - a.maxPossible;
   });
+}
 
-  // 각 도메인별 평균 점수 계산
+// ===== STEP 2: 도메인별 점수 계산 =====
+export function calculateDomainScores(themeScores: ThemeScore[]): DomainScore[] {
+  const domainMap = new Map<Domain, number[]>();
+
+  for (const ts of themeScores) {
+    const scores = domainMap.get(ts.domain) || [];
+    scores.push(ts.standardizedScore);
+    domainMap.set(ts.domain, scores);
+  }
+
   const domainScores: DomainScore[] = [];
-  let totalScore = 0;
+  let totalAvg = 0;
 
-  Object.entries(domainScoreMap).forEach(([domain, scores]) => {
-    if (scores.length > 0) {
-      const avgScore = scores.reduce((a, b) => a + b, 0) / scores.length;
-      totalScore += avgScore;
-      domainScores.push({
-        domain: domain as Domain,
-        score: Math.round(avgScore * 100) / 100,
-        percentage: 0, // 나중에 계산
-      });
-    }
-  });
+  for (const [domain, scores] of domainMap) {
+    const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
+    totalAvg += avg;
+    domainScores.push({
+      domain,
+      averageScore: Math.round(avg * 10) / 10,
+      percentage: 0,
+      themeCount: scores.length,
+    });
+  }
 
-  // 비율 계산
-  domainScores.forEach((ds) => {
-    ds.percentage = Math.round((ds.score / totalScore) * 100);
-  });
+  for (const ds of domainScores) {
+    ds.percentage = totalAvg > 0
+      ? Math.round((ds.averageScore / totalAvg) * 100)
+      : 25;
+  }
 
-  return domainScores.sort((a, b) => b.score - a.score);
+  return domainScores.sort((a, b) => b.averageScore - a.averageScore);
 }
 
-// 유형 판정 로직
-export function determineFitnessType(
-  topStrengths: KeywordScore[],
+// ===== STEP 3: 리더십 유형 판정 =====
+export function determineLeadershipType(
   domainScores: DomainScore[],
-  role: Role
-): FitnessType {
-  const top5Keywords = topStrengths.slice(0, 5).map((s) => s.keyword.nameKo);
-  const top5Domains = topStrengths.slice(0, 5).map((s) => s.keyword.domain);
-
-  // 도메인별 TOP5 내 개수
-  const domainCounts: Record<Domain, number> = {
-    executing: 0,
-    influencing: 0,
-    relationship: 0,
-    thinking: 0,
+  themeScores: ThemeScore[],
+): LeadershipTypeId {
+  const domainToType: Record<Domain, LeadershipTypeId> = {
+    thinking: 'vision',
+    executing: 'execution',
+    relationship: 'relationship',
+    influencing: 'strategic',
   };
-  top5Domains.forEach((d) => {
-    domainCounts[d]++;
-  });
 
-  // 유형 판정 (우선순위 순)
+  const sorted = [...domainScores].sort((a, b) => b.averageScore - a.averageScore);
+  const top = sorted[0];
+  const second = sorted[1];
 
-  // 1. 론울프: 개별화 + 공감 + 관계형성 3개 이상
-  if (
-    top5Keywords.includes('개별화') &&
-    top5Keywords.includes('공감') &&
-    domainCounts.relationship >= 3
-  ) {
-    return fitnessTypes.LONE_WOLF;
+  // 동점(3점 이내) 시 S+A 등급 수로 판정
+  if (second && Math.abs(top.averageScore - second.averageScore) <= 3) {
+    const topSA = themeScores.filter(
+      ts => ts.domain === top.domain && (ts.grade === 'S' || ts.grade === 'A')
+    ).length;
+    const secondSA = themeScores.filter(
+      ts => ts.domain === second.domain && (ts.grade === 'S' || ts.grade === 'A')
+    ).length;
+
+    if (secondSA > topSA) {
+      return domainToType[second.domain];
+    }
   }
 
-  // 2. 제국건설자: 주도력 + 비전제시 + 영향력 3개 이상
-  if (
-    top5Keywords.includes('주도력') &&
-    (top5Keywords.includes('비전제시') || top5Keywords.includes('전략')) &&
-    domainCounts.influencing >= 2
-  ) {
-    return fitnessTypes.EMPIRE_BUILDER;
-  }
+  return domainToType[top.domain];
+}
 
-  // 3. 결과머신: 성취 + 경쟁 + 집중
-  if (
-    top5Keywords.includes('성취') &&
-    (top5Keywords.includes('경쟁') || top5Keywords.includes('집중')) &&
-    domainCounts.executing >= 2
-  ) {
-    return fitnessTypes.RESULT_MACHINE;
-  }
+// ===== STEP 4: 역할별 하위유형 판정 =====
+export function determineRoleSubType(
+  role: Role,
+  supplementaryResponses: Response[],
+  themeScores: ThemeScore[],
+): string {
+  const getSupp = (key: string): number => {
+    const r = supplementaryResponses.find(s => s.questionId === key);
+    return r?.score || 3;
+  };
 
-  // 4. 힐링마스터: 공감 + 성장지원 + 긍정
-  if (
-    top5Keywords.includes('공감') &&
-    (top5Keywords.includes('성장지원') || top5Keywords.includes('긍정')) &&
-    domainCounts.relationship >= 2
-  ) {
-    return fitnessTypes.HEALING_MASTER;
-  }
+  const getThemeStd = (id: ThemeId): number => {
+    return themeScores.find(t => t.themeId === id)?.standardizedScore || 50;
+  };
 
-  // 5. 크리에이터: 발상 + 소통 + 미래지향
-  if (
-    top5Keywords.includes('발상') ||
-    (top5Keywords.includes('소통') && top5Keywords.includes('미래지향'))
-  ) {
-    return fitnessTypes.CREATOR;
-  }
+  const s1 = getSupp('S1');
 
-  // 6. 전략분석가: 분석 + 전략 + 체계
-  if (
-    top5Keywords.includes('분석') ||
-    (top5Keywords.includes('전략') && top5Keywords.includes('체계'))
-  ) {
-    return fitnessTypes.STRATEGIST;
-  }
-
-  // 7. 멘토장인: 성장지원 + 배움 + 개별화
-  if (
-    top5Keywords.includes('성장지원') &&
-    (top5Keywords.includes('배움') || top5Keywords.includes('개별화'))
-  ) {
-    return fitnessTypes.MASTER_MENTOR;
-  }
-
-  // 8. 올라운더: 4개 도메인이 고르게 분포
-  const maxDomain = Math.max(...Object.values(domainCounts));
-  if (maxDomain <= 2) {
-    return fitnessTypes.ALL_ROUNDER;
-  }
-
-  // 기본값: 도메인별 대표 유형
-  const topDomain = domainScores[0]?.domain;
-  switch (topDomain) {
-    case 'executing':
-      return fitnessTypes.RESULT_MACHINE;
-    case 'influencing':
-      return fitnessTypes.EMPIRE_BUILDER;
-    case 'relationship':
-      return fitnessTypes.HEALING_MASTER;
-    case 'thinking':
-      return fitnessTypes.STRATEGIST;
-    default:
-      return fitnessTypes.ALL_ROUNDER;
+  switch (role) {
+    case 'ceo': {
+      if (s1 <= 2 && getThemeStd('vision') >= 75) return '지점확장형';
+      if (s1 >= 4 && getThemeStd('communication') >= 75) return '온라인확장형';
+      if (getThemeStd('influence') + getThemeStd('communication') >
+          getThemeStd('vision') + getThemeStd('analysis')) return '브랜드형';
+      return '전문화형';
+    }
+    case 'manager': {
+      if (s1 <= 2 && getThemeStd('completion') >= 75) return '성과중심형';
+      if (s1 >= 4 && getThemeStd('empathy') >= 75) return '관계중심형';
+      if (getThemeStd('developer') >= 75) return '코칭중심형';
+      return '시스템중심형';
+    }
+    case 'trainer': {
+      if (s1 <= 2 && getThemeStd('execution') >= 75) return '밀어붙임형';
+      if (s1 >= 4 && getThemeStd('empathy') >= 75) return '공감형';
+      if (getThemeStd('analysis') >= 75) return '분석형';
+      return '동기부여형';
+    }
+    case 'fc': {
+      if (s1 <= 2 && getThemeStd('relator') >= 75) return '관계·신뢰형';
+      if (s1 >= 4 && getThemeStd('analysis') >= 75) return '논리·데이터형';
+      if (getThemeStd('positivity') >= 75) return '열정·에너지형';
+      return '안정·신뢰형';
+    }
   }
 }
 
-// 전체 결과 계산
-export function calculateResults(responses: Response[], role: Role) {
-  const keywordScores = calculateKeywordScores(responses);
-  const domainScores = calculateDomainScores(keywordScores);
-  const topStrengths = keywordScores.slice(0, 5);
-  const fitnessType = determineFitnessType(topStrengths, domainScores, role);
+// ===== 등급 분포 =====
+function calculateGradeDistribution(themeScores: ThemeScore[]): Record<Grade, number> {
+  const dist: Record<Grade, number> = { S: 0, A: 0, B: 0, C: 0, D: 0, E: 0 };
+  for (const ts of themeScores) {
+    dist[ts.grade]++;
+  }
+  return dist;
+}
+
+// ===== 무료 결과 계산 =====
+export function calculateFreeResults(
+  role: Role,
+  responses: Response[],
+): FreeResult {
+  const themeScores = calculateThemeScores(role, responses);
+  const domainScores = calculateDomainScores(themeScores);
+  const leadershipTypeId = determineLeadershipType(domainScores, themeScores);
+
+  const supplementary = responses.filter(r => r.isSupplementary);
+  const roleSubType = determineRoleSubType(role, supplementary, themeScores);
+
+  const leadershipType = LEADERSHIP_TYPES[leadershipTypeId];
+  const combo = getLeadershipCombo(role, leadershipTypeId);
+
+  const leadership: LeadershipResult = {
+    primaryType: leadershipTypeId,
+    primaryTypeName: leadershipType.nameKo,
+    roleSubType,
+    role,
+    combo: combo || {
+      leadershipType: leadershipTypeId,
+      role,
+      comboTitle: leadershipType.nameKo,
+      tagline: leadershipType.description,
+      mainMessage: '',
+      slogan: '',
+      hashtags: [],
+      viralQuotes: [],
+      recommendedBusiness: [],
+    },
+  };
 
   return {
-    role,
-    fitnessType,
-    topStrengths,
+    leadership,
+    top5: themeScores.slice(0, 5),
     domainScores,
-    allScores: keywordScores,
+    role,
+  };
+}
+
+// ===== 전체 결과 계산 (프리미엄) =====
+export function calculateFullResults(
+  role: Role,
+  responses: Response[],
+): FullAssessmentResult {
+  const freeResult = calculateFreeResults(role, responses);
+  const themeScores = calculateThemeScores(role, responses);
+  const gradeDistribution = calculateGradeDistribution(themeScores);
+  const blindSpots = [...themeScores].reverse().slice(0, 5);
+
+  const roleSubType = freeResult.leadership.roleSubType;
+
+  const roleSubTypeDetail: RoleSubTypeResult = {
+    typeName: roleSubType,
+    description: `당신은 ${roleSubType} 유형의 ${freeResult.leadership.primaryTypeName} 리더입니다.`,
+    shareQuote: `나는 ${roleSubType} 유형!`,
+    strength: '',
+    caution: '',
+    actionTip: '',
+  };
+
+  const emptyResult: RoleSpecificResult = {
+    title: '',
+    typeName: '',
+    description: '',
+    shareQuote: '',
+    actionTips: [],
+  };
+
+  // excluded 테마도 0점/E등급으로 추가하여 전체 30개 표시
+  const weights = ROLE_THEME_WEIGHTS[role];
+  const includedIds = new Set(themeScores.map(ts => ts.themeId));
+  const excludedThemes: ThemeScore[] = [];
+  for (const [themeId, weight] of Object.entries(weights) as [ThemeId, WeightLevel][]) {
+    if (weight === 'excluded' && !includedIds.has(themeId)) {
+      const theme = THEME_MAP[themeId];
+      if (theme) {
+        excludedThemes.push({
+          themeId,
+          nameKo: theme.nameKo,
+          domain: theme.domain,
+          rawScore: 0,
+          maxPossible: 0,
+          standardizedScore: 0,
+          grade: 'E',
+          weight,
+        });
+      }
+    }
+  }
+  const allThemeScores = [...themeScores, ...excludedThemes];
+
+  return {
+    ...freeResult,
+    allThemeScores,
+    gradeDistribution,
+    blindSpots,
+    roleSubTypeDetail,
+    roleResult11: emptyResult,
+    roleResult12: emptyResult,
+    roleResult13: emptyResult,
   };
 }

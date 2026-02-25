@@ -1,13 +1,14 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, useCallback, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { getQuestions } from "@/data/questions";
+import { Badge } from "@/components/ui/badge";
+import { buildQuestionsForRole, shuffleQuestions } from "@/lib/question-builder";
 import { Role, Question, Response } from "@/types";
 
 const scaleOptions = [
@@ -29,11 +30,12 @@ function AssessmentContent() {
   const [currentAnswer, setCurrentAnswer] = useState<number | null>(null);
 
   useEffect(() => {
-    if (!role || !["manager", "operator", "trainer"].includes(role)) {
+    if (!role || !["ceo", "manager", "trainer", "fc"].includes(role)) {
       router.push("/select-role");
       return;
     }
-    setQuestions(getQuestions(role));
+    const built = buildQuestionsForRole(role);
+    setQuestions(shuffleQuestions(built));
   }, [role, router]);
 
   const currentQuestion = questions[currentIndex];
@@ -44,14 +46,15 @@ function AssessmentContent() {
     setCurrentAnswer(parseInt(value));
   };
 
-  const handleNext = () => {
+  const handleNext = useCallback(() => {
     if (currentAnswer === null || !currentQuestion) return;
 
     const newResponse: Response = {
       questionId: currentQuestion.id,
-      keywordId: currentQuestion.keywordId,
-      type: currentQuestion.type,
+      themeId: currentQuestion.themeId,
+      questionType: currentQuestion.questionType,
       score: currentAnswer,
+      isSupplementary: currentQuestion.isSupplementary,
     };
 
     const newResponses = [...responses, newResponse];
@@ -65,7 +68,7 @@ function AssessmentContent() {
       setCurrentIndex(currentIndex + 1);
       setCurrentAnswer(null);
     }
-  };
+  }, [currentAnswer, currentQuestion, responses, isLastQuestion, currentIndex, role, router]);
 
   const handlePrev = () => {
     if (currentIndex > 0) {
@@ -89,18 +92,20 @@ function AssessmentContent() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [currentAnswer, currentIndex]);
+  }, [currentAnswer, handleNext]);
 
   if (questions.length === 0) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
           <Loader2 className="w-8 h-8 animate-spin text-violet-600 mx-auto mb-4" />
-          <p className="text-slate-600">로딩 중...</p>
+          <p className="text-slate-600">문항을 준비하고 있습니다...</p>
         </div>
       </div>
     );
   }
+
+  const isSupplementarySection = currentQuestion?.isSupplementary;
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-slate-50 to-white py-8 md:py-20">
@@ -117,15 +122,31 @@ function AssessmentContent() {
             <Progress value={progress} className="h-2" />
           </div>
 
+          {/* Supplementary Section Notice */}
+          {isSupplementarySection && currentIndex > 0 && !questions[currentIndex - 1]?.isSupplementary && (
+            <div className="mb-4 p-3 bg-blue-50 rounded-lg text-center">
+              <p className="text-sm text-blue-700 font-medium">
+                마지막 추가 질문입니다. 조금만 더 힘내세요!
+              </p>
+            </div>
+          )}
+
           {/* Question Card */}
           <Card className="mb-8 shadow-lg">
             <CardContent className="p-8">
               <div className="text-center mb-8">
-                <span className="inline-block bg-violet-100 text-violet-700 text-sm font-medium px-3 py-1 rounded-full mb-4">
-                  Q{currentIndex + 1}
-                </span>
+                <div className="flex items-center justify-center gap-2 mb-4">
+                  <span className="inline-block bg-violet-100 text-violet-700 text-sm font-medium px-3 py-1 rounded-full">
+                    Q{currentIndex + 1}
+                  </span>
+                  {isSupplementarySection && (
+                    <Badge variant="outline" className="text-blue-600 border-blue-300">
+                      추가 문항
+                    </Badge>
+                  )}
+                </div>
                 <h2 className="text-xl md:text-2xl font-medium text-slate-900 leading-relaxed">
-                  {currentQuestion?.content}
+                  {currentQuestion?.text}
                 </h2>
               </div>
 

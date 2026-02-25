@@ -143,3 +143,81 @@
     height: 0;
   }
 }
+
+/* PDF 인쇄 스타일 */
+@media print {
+  /* 배경색 출력 */
+  *,
+  *::before,
+  *::after {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* 불필요한 요소 숨기기 */
+  .no-print,
+  nav,
+  footer {
+    display: none !important;
+  }
+
+  /* 페이지 설정 */
+  @page {
+    size: A4;
+    margin: 10mm;
+  }
+
+  /* 연속 흐름: 자연스럽게 이어지도록 */
+  html, body {
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  main {
+    padding: 0 !important;
+  }
+
+  /* 섹션마다 새 페이지에서 시작 (제목이 항상 페이지 상단) */
+  section {
+    break-before: page;
+  }
+
+  /* 이미지 잘림 방지 */
+  img {
+    break-inside: avoid;
+  }
+
+  /* 그림자 제거 */
+  .shadow-sm,
+  .shadow-lg,
+  .shadow-2xl {
+    box-shadow: none !important;
+  }
+
+  /* 2열 그리드 강제 (A4 폭에서 md 브레이크포인트 보장) */
+  .grid.md\:grid-cols-2 {
+    grid-template-columns: 1fr 1fr !important;
+    gap: 12px !important;
+  }
+
+  /* 구분선 축소 */
+  hr {
+    margin: 8px 0 !important;
+    opacity: 0.3;
+  }
+
+  /* 섹션 간 여백 적절히 축소 */
+  .mb-8 {
+    margin-bottom: 16px !important;
+  }
+  .mb-12 {
+    margin-bottom: 20px !important;
+  }
+  .mb-10 {
+    margin-bottom: 16px !important;
+  }
+  .my-8 {
+    margin-top: 12px !important;
+    margin-bottom: 12px !important;
+  }
+}
