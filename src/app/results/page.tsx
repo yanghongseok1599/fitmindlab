@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import html2canvas from "html2canvas";
@@ -41,6 +41,12 @@ import {
   Calculator,
   Skull,
   Rocket as RocketIcon,
+  Copy,
+  Check,
+  ImageDown,
+  MessageSquare,
+  Camera,
+  Link2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -80,7 +86,10 @@ export default function ResultsPage() {
   const [result, setResult] = useState<FullAssessmentResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
   const shareCardRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const responsesData = sessionStorage.getItem("assessmentResponses");
@@ -127,9 +136,62 @@ export default function ResultsPage() {
     setIsGenerating(false);
   };
 
-  const generateAndShareImage = async () => {
-    if (!shareCardRef.current || !result) return;
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3000);
+  };
 
+  // Kakao SDK 초기화
+  useEffect(() => {
+    const initKakao = () => {
+      const w = window as typeof window & { Kakao?: { isInitialized: () => boolean; init: (key: string) => void } };
+      const key = process.env.NEXT_PUBLIC_KAKAO_JS_KEY;
+      if (w.Kakao && !w.Kakao.isInitialized() && key) {
+        w.Kakao.init(key);
+      }
+    };
+    // SDK가 이미 로드되었을 수 있으므로 즉시 시도 + 지연 시도
+    initKakao();
+    const timer = setTimeout(initKakao, 2000);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const shareToKakao = () => {
+    if (!result) return;
+    const w = window as typeof window & { Kakao?: { isInitialized: () => boolean; Share: { sendDefault: (options: Record<string, unknown>) => void } } };
+    if (w.Kakao?.isInitialized()) {
+      w.Kakao.Share.sendDefault({
+        objectType: "feed",
+        content: {
+          title: `나는 [${result.leadership.combo.comboTitle}] 유형!`,
+          description: result.leadership.combo.slogan,
+          imageUrl: "https://fitmindlab.vercel.app/og-image.png",
+          link: {
+            mobileWebUrl: "https://fitmindlab.vercel.app",
+            webUrl: "https://fitmindlab.vercel.app",
+          },
+        },
+        buttons: [
+          {
+            title: "나도 검사하기",
+            link: {
+              mobileWebUrl: "https://fitmindlab.vercel.app",
+              webUrl: "https://fitmindlab.vercel.app",
+            },
+          },
+        ],
+      });
+    } else {
+      // SDK 미로드 fallback: 링크 복사 + 안내
+      navigator.clipboard.writeText(
+        `나는 [${result.leadership.combo.comboTitle}] 유형의 [${ROLE_LABELS[result.role]}]입니다!\n"${result.leadership.combo.slogan}"\n\n나도 검사하기 → https://fitmindlab.vercel.app`
+      );
+      showToast("공유 텍스트가 복사되었습니다! 카카오톡에 붙여넣기 해주세요");
+    }
+  };
+
+  const shareToInstagram = async () => {
+    if (!shareCardRef.current || !result) return;
     setIsGenerating(true);
     await new Promise((resolve) => setTimeout(resolve, 100));
 
@@ -146,33 +208,37 @@ export default function ResultsPage() {
         },
       });
 
-      canvas.toBlob(async (blob) => {
-        if (!blob) { setIsGenerating(false); return; }
+      // 이미지 다운로드
+      const link = document.createElement("a");
+      link.download = `핏마인드랩-${result.leadership.combo.comboTitle}-결과.png`;
+      link.href = canvas.toDataURL("image/png");
+      link.click();
 
-        const file = new File([blob], `핏마인드랩-결과.png`, { type: "image/png" });
+      // 해시태그 클립보드 복사
+      const hashtags = result.leadership.combo.hashtags.map(t => `#${t}`).join(" ");
+      const shareText = `나는 [${result.leadership.combo.comboTitle}] 유형! ${hashtags} #핏마인드랩 #강점검사\n\n나도 검사하기 → fitmindlab.vercel.app`;
+      await navigator.clipboard.writeText(shareText);
 
-        if (navigator.share && navigator.canShare({ files: [file] })) {
-          try {
-            await navigator.share({
-              title: "피트니스 리더십 검사 결과",
-              text: `나는 [${result.leadership.combo.comboTitle}] 유형의 [${ROLE_LABELS[result.role]}]입니다!\n\n"${result.leadership.combo.slogan}"\n\n나도 검사하기 → fitmindlab.vercel.app`,
-              files: [file],
-            });
-          } catch {
-            // Share cancelled
-          }
-        } else {
-          const link = document.createElement("a");
-          link.download = `핏마인드랩-결과.png`;
-          link.href = canvas.toDataURL("image/png");
-          link.click();
-          alert("이미지가 저장되었습니다! SNS에 직접 업로드해주세요.");
-        }
-        setIsGenerating(false);
-      }, "image/png");
+      showToast("이미지 저장 + 텍스트 복사 완료! 인스타그램에 업로드하세요");
+
+      // 모바일에서 인스타 앱 열기 시도
+      setTimeout(() => {
+        window.location.href = "instagram://app";
+      }, 500);
     } catch (error) {
-      console.error("Image generation failed:", error);
-      setIsGenerating(false);
+      console.error("Instagram share failed:", error);
+      showToast("이미지 저장에 실패했습니다");
+    }
+    setIsGenerating(false);
+  };
+
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText("https://fitmindlab.vercel.app");
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    } catch {
+      showToast("링크 복사에 실패했습니다");
     }
   };
 
@@ -182,9 +248,80 @@ export default function ResultsPage() {
     router.push("/select-role");
   };
 
-  const handlePdfDownload = () => {
-    window.print();
+  const handlePdfDownload = async () => {
+    if (!contentRef.current || !result) return;
+    setIsGenerating(true);
+
+    try {
+      // no-print 요소 임시 숨김
+      const noPrintEls = contentRef.current.querySelectorAll('.no-print');
+      noPrintEls.forEach(el => ((el as HTMLElement).style.display = 'none'));
+
+      // Separator(hr) 여백 축소
+      const separators = contentRef.current.querySelectorAll('hr, [role="separator"]');
+      const origStyles: string[] = [];
+      separators.forEach(el => {
+        const htmlEl = el as HTMLElement;
+        origStyles.push(htmlEl.style.cssText);
+        htmlEl.style.margin = '16px 0';
+      });
+
+      const canvas = await html2canvas(contentRef.current, {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff',
+        windowWidth: 800,
+      });
+
+      // 원복
+      noPrintEls.forEach(el => ((el as HTMLElement).style.display = ''));
+      separators.forEach((el, i) => {
+        (el as HTMLElement).style.cssText = origStyles[i];
+      });
+
+      const imgData = canvas.toDataURL('image/jpeg', 0.92);
+      const pdfWidth = 210; // A4 width mm
+      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+
+      const { jsPDF } = await import('jspdf');
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: [pdfWidth, pdfHeight],
+      });
+
+      pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
+      pdf.save(`핏마인드랩-${result.leadership.combo.comboTitle}-결과.pdf`);
+      showToast('PDF가 저장되었습니다!');
+    } catch (error) {
+      console.error('PDF generation failed:', error);
+      showToast('PDF 생성에 실패했습니다. 다시 시도해주세요.');
+    }
+
+    setIsGenerating(false);
   };
+
+  // Scroll-triggered fade-in animation
+  const observerRef = useRef<IntersectionObserver | null>(null);
+  const animateOnScroll = useCallback((node: HTMLElement | null) => {
+    if (!node) return;
+    if (!observerRef.current) {
+      observerRef.current = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((entry) => {
+            if (entry.isIntersecting) {
+              entry.target.classList.add("animate-fade-in-up");
+              observerRef.current?.unobserve(entry.target);
+            }
+          });
+        },
+        { threshold: 0.08, rootMargin: "0px 0px -40px 0px" }
+      );
+    }
+    node.style.opacity = "0";
+    observerRef.current.observe(node);
+  }, []);
 
   if (loading || !result) {
     return (
@@ -228,10 +365,10 @@ export default function ResultsPage() {
   return (
     <main className="min-h-screen bg-gradient-to-b from-slate-50 to-white py-8 md:py-16">
       <div className="container mx-auto px-4">
-        <div className="max-w-3xl mx-auto">
+        <div ref={contentRef} className="max-w-3xl mx-auto">
 
           {/* ====== 1. Leadership Type Hero Card ====== */}
-          <Card className="mb-8 overflow-hidden shadow-2xl border-0">
+          <Card className="mb-8 overflow-hidden shadow-2xl border-0 hover:shadow-3xl transition-shadow duration-500 hover-shine">
             {/* White Top Section: Badges + Image */}
             <div className="bg-white p-8 pb-0 text-center">
               <div className="flex items-center justify-center gap-2 mb-6">
@@ -245,18 +382,18 @@ export default function ResultsPage() {
 
               {/* Character Image */}
               {combo.image && (
-                <div className="relative w-48 h-48 md:w-64 md:h-64 mx-auto mb-0">
+                <div className="relative w-48 h-48 md:w-64 md:h-64 mx-auto mb-0 animate-float">
                   <Image
                     src={combo.image}
                     alt={combo.comboTitle}
                     fill
-                    className="object-contain"
+                    className="object-contain hover:scale-105 transition-transform duration-500"
                     priority
                   />
                 </div>
               )}
               {!combo.image && (
-                <div className="text-7xl mb-0">{leadershipType.emoji}</div>
+                <div className="text-7xl mb-0 animate-float">{leadershipType.emoji}</div>
               )}
             </div>
 
@@ -277,7 +414,7 @@ export default function ResultsPage() {
 
             <CardContent className="p-8">
               {/* Slogan */}
-              <div className="bg-slate-50 rounded-xl p-5 text-center mb-6">
+              <div className="bg-slate-50 rounded-xl p-5 text-center mb-6 hover-shine relative overflow-hidden">
                 <p className="text-xl font-bold text-slate-900">
                   &ldquo;{combo.slogan.split('. ').map((sentence, i, arr) => (
                     <span key={i}>
@@ -306,7 +443,7 @@ export default function ResultsPage() {
               {/* Hashtags */}
               <div className="flex flex-wrap gap-2 justify-center">
                 {combo.hashtags.map((tag, index) => (
-                  <Badge key={index} variant="secondary" className="text-sm">
+                  <Badge key={index} variant="secondary" className="text-sm hover:scale-105 transition-transform duration-200 cursor-default">
                     #{tag}
                   </Badge>
                 ))}
@@ -315,36 +452,38 @@ export default function ResultsPage() {
           </Card>
 
           {/* ====== Share Buttons ====== */}
-          <div className="flex flex-col sm:flex-row gap-4 justify-center mb-8 no-print">
-            <Button
-              onClick={generateAndShareImage}
-              disabled={isGenerating}
-              size="lg"
-              className="bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600"
+          <div className="grid grid-cols-2 gap-3 mb-8 no-print">
+            {/* 공유하기 */}
+            <button
+              onClick={copyLink}
+              className="flex items-center justify-center gap-3 p-4 rounded-2xl bg-slate-100 text-slate-700 font-bold text-sm hover:bg-slate-200 hover:scale-[1.02] hover:shadow-md transition-all duration-300"
             >
-              {isGenerating ? (
-                <><Loader2 className="w-4 h-4 mr-2 animate-spin" />이미지 생성 중...</>
+              {linkCopied ? (
+                <><Check className="w-5 h-5 text-green-500" />복사 완료!</>
               ) : (
-                <><Share2 className="w-4 h-4 mr-2" />카드 이미지 공유하기</>
+                <><Share2 className="w-5 h-5" />공유하기</>
               )}
-            </Button>
-            <Button
+            </button>
+
+            {/* 이미지 저장 */}
+            <button
               onClick={generateAndDownloadImage}
               disabled={isGenerating}
-              variant="outline"
+              className="flex items-center justify-center gap-3 p-4 rounded-2xl bg-slate-100 text-slate-700 font-bold text-sm hover:bg-slate-200 hover:scale-[1.02] hover:shadow-md transition-all duration-300 disabled:opacity-50"
             >
               {isGenerating ? (
-                <><Loader2 className="w-4 h-4 mr-2 animate-spin" />생성 중...</>
+                <Loader2 className="w-5 h-5 animate-spin" />
               ) : (
-                <><Download className="w-4 h-4 mr-2" />이미지 저장하기</>
+                <ImageDown className="w-5 h-5" />
               )}
-            </Button>
+              이미지 저장
+            </button>
           </div>
 
           <Separator className="my-10" />
 
           {/* ====== 2. TOP 5 Strengths + Domain Distribution (Side by Side) ====== */}
-          <section className="mb-12">
+          <section ref={animateOnScroll} className="mb-12">
             {/* Titles */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-4">
               <h2 className="text-xl font-bold text-slate-900 text-center flex items-center justify-center">
@@ -365,7 +504,7 @@ export default function ResultsPage() {
                   const gradeInfo = GRADE_INFO[item.grade];
                   const rankLabels = ["1st", "2nd", "3rd", "4th", "5th"];
                   return (
-                    <Card key={item.themeId} className="overflow-hidden">
+                    <Card key={item.themeId} className="overflow-hidden hover:shadow-md hover:-translate-y-0.5 transition-all duration-300">
                       <CardContent className="p-0">
                         <div className="flex items-stretch">
                           <div
@@ -443,7 +582,7 @@ export default function ResultsPage() {
                           </div>
                           <div className="w-full h-4 bg-slate-100 rounded-full overflow-hidden">
                             <div
-                              className="h-full rounded-full transition-all"
+                              className="h-full rounded-full transition-all duration-700 ease-out"
                               style={{ width: `${ds.percentage}%`, backgroundColor: info.color }}
                             />
                           </div>
@@ -459,7 +598,7 @@ export default function ResultsPage() {
           <Separator className="my-10" />
 
           {/* ====== 전체 강점 순위 ====== */}
-          <section className="mb-12">
+          <section ref={animateOnScroll} className="mb-12">
             <div className="flex flex-col items-center mb-8">
               <span className="text-xs font-bold text-green-500 tracking-widest uppercase mb-2">Full Ranking</span>
               <h2 className="text-2xl font-bold text-slate-900">전체 강점 순위</h2>
@@ -479,9 +618,9 @@ export default function ResultsPage() {
                 return (
                   <div
                     key={theme.themeId}
-                    className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border ${isTop5 ? 'bg-green-50 border-green-100' : isBottom5 ? 'bg-green-50/50 border-green-100' : 'bg-white border-green-100'}`}
+                    className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border ${isTop5 ? 'bg-green-50 border-green-100' : isBottom5 ? 'bg-red-50/60 border-red-100' : 'bg-white border-slate-100'}`}
                   >
-                    <span className={`w-5 text-right font-black text-xs shrink-0 ${isTop5 ? 'text-slate-800' : isBottom5 ? 'text-slate-300' : 'text-slate-400'}`}>
+                    <span className={`w-5 text-right font-black text-xs shrink-0 ${isTop5 ? 'text-slate-800' : isBottom5 ? 'text-red-300' : 'text-slate-400'}`}>
                       {i + 1}
                     </span>
                     <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: domainInfo.color }} />
@@ -516,7 +655,7 @@ export default function ResultsPage() {
               ======================================================================== */}
 
           {/* ====== 3. 나와 같은 유형의 유명인/롤모델 ====== */}
-          <section className="mb-12">
+          <section ref={animateOnScroll} className="mb-12">
             <div className="flex flex-col items-center mb-8">
               <span className="text-xs font-bold text-violet-500 tracking-widest uppercase mb-2">Role Models</span>
               <h2 className="text-2xl font-bold text-slate-900">나와 같은 유형의 유명인</h2>
@@ -526,7 +665,7 @@ export default function ResultsPage() {
 
             <div className="grid grid-cols-1 gap-6 mb-8">
               {roleModels.models.map((model, i) => (
-                <div key={i} className="bg-white border border-slate-200 rounded-2xl p-8 relative overflow-hidden hover:border-slate-200 transition-all">
+                <div key={i} className="bg-white border border-slate-200 rounded-2xl p-8 relative overflow-hidden hover:border-slate-300 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300 hover-shine">
                   
                   <div>
                     <div className="flex flex-wrap items-center gap-3 mb-4">
@@ -546,7 +685,7 @@ export default function ResultsPage() {
               <p className="text-xs font-bold text-violet-300 uppercase tracking-widest mb-4 text-center">Common Traits</p>
               <div className="flex flex-wrap gap-2 justify-center">
                 {roleModels.commonTraits.map((trait, i) => (
-                  <span key={i} className="text-sm font-medium px-4 py-2 bg-white border border-slate-100 text-slate-700 rounded-full">{trait}</span>
+                  <span key={i} className="text-sm font-medium px-4 py-2 bg-white border border-slate-100 text-slate-700 rounded-full hover:bg-violet-50 hover:border-violet-200 hover:scale-105 transition-all duration-200 cursor-default">{trait}</span>
                 ))}
               </div>
             </div>
@@ -555,7 +694,7 @@ export default function ResultsPage() {
           <Separator className="my-10" />
 
           {/* ====== 4. 내가 팀을 망치는 순간 ====== */}
-          <section className="mb-12">
+          <section ref={animateOnScroll} className="mb-12">
             <div className="flex flex-col items-center mb-8">
               <span className="text-xs font-bold text-red-500 tracking-widest uppercase mb-2">Warning</span>
               <h2 className="text-2xl font-bold text-slate-900">내가 팀을 망치는 순간</h2>
@@ -615,7 +754,7 @@ export default function ResultsPage() {
           {role === 'ceo' && ceoHiring && (
             <>
               <Separator className="my-10" />
-              <section className="mb-12">
+              <section ref={animateOnScroll} className="mb-12">
                 <div className="flex flex-col items-center mb-8">
                   <span className="text-xs font-bold text-green-500 tracking-widest uppercase mb-2">Recruitment</span>
                   <h2 className="text-2xl font-bold text-slate-900">당장 채용해야 하는 인재 유형</h2>
@@ -642,7 +781,7 @@ export default function ResultsPage() {
                         <span className="text-[10px] font-black text-green-300 uppercase tracking-widest">Key Qualities</span>
                         <div className="flex flex-wrap gap-2">
                           {hire.keyQualities.map((q, j) => (
-                            <span key={j} className="text-[11px] font-bold px-3 py-1 bg-green-50 border border-green-200 text-slate-600 rounded-full">{q}</span>
+                            <span key={j} className="text-[11px] font-bold px-3 py-1 bg-green-50 border border-green-200 text-slate-600 rounded-full hover:bg-green-100 hover:scale-105 transition-all duration-200">{q}</span>
                           ))}
                         </div>
                       </div>
@@ -665,7 +804,7 @@ export default function ResultsPage() {
               ======================================================================== */}
 
           {/* ====== 6. 나와 최악의 궁합 유형 ====== */}
-          <section className="mb-12">
+          <section ref={animateOnScroll} className="mb-12">
             <div className="flex flex-col items-center mb-8">
               <span className="text-xs font-bold text-red-500 tracking-widest uppercase mb-2">Worst Match</span>
               <h2 className="text-2xl font-bold text-slate-900">나와 최악의 궁합 유형</h2>
@@ -713,7 +852,7 @@ export default function ResultsPage() {
           <Separator className="my-10" />
 
           {/* ====== 7. 연봉/매출 성장 공식 ====== */}
-          <section className="mb-12">
+          <section ref={animateOnScroll} className="mb-12">
             <div className="flex flex-col items-center mb-8">
               <span className="text-xs font-bold text-green-500 tracking-widest uppercase mb-2">Growth Formula</span>
               <h2 className="text-2xl font-bold text-slate-900">연봉/매출 성장 공식</h2>
@@ -723,7 +862,7 @@ export default function ResultsPage() {
             <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden mb-8">
               <div className="p-8 text-center border-b border-slate-100">
                 <h3 className="text-xl font-bold text-slate-900 mb-4">{incomeFormula.formulaTitle}</h3>
-                <div className="bg-green-50 rounded-xl p-5 border border-green-100 mb-4">
+                <div className="bg-green-50 rounded-xl p-5 border border-green-100 mb-4 hover-shine relative overflow-hidden">
                   <p className="text-green-600 font-black text-xl tracking-tight">{incomeFormula.formula}</p>
                 </div>
                 <p className="text-sm text-slate-500 leading-relaxed">{incomeFormula.explanation}</p>
@@ -738,7 +877,7 @@ export default function ResultsPage() {
                       <div className="absolute left-0 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-green-500 flex items-center justify-center text-white font-black text-sm hidden md:flex">
                         {i + 1}
                       </div>
-                      <div className="bg-white border border-slate-200 rounded-2xl p-6 hover:border-slate-200 transition-all">
+                      <div className="bg-white border border-slate-200 rounded-2xl p-6 hover:border-slate-300 hover:shadow-md hover:-translate-y-0.5 transition-all duration-300">
                         <h3 className="font-bold text-slate-900 mb-2">{step.step}</h3>
                         <p className="text-sm text-slate-500 mb-3 leading-relaxed">{step.action}</p>
                         <div className="flex items-center gap-2">
@@ -761,7 +900,7 @@ export default function ResultsPage() {
           <Separator className="my-10" />
 
           {/* ====== 8. 나의 마케팅 전략 ====== */}
-          <section className="mb-12">
+          <section ref={animateOnScroll} className="mb-12">
             <div className="flex flex-col items-center mb-8">
               <span className="text-xs font-bold text-blue-500 tracking-widest uppercase mb-2">Marketing</span>
               <h2 className="text-2xl font-bold text-slate-900">나의 마케팅 전략</h2>
@@ -771,7 +910,7 @@ export default function ResultsPage() {
             <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden mb-8">
               <div className="p-6">
                 <div className="flex flex-wrap items-center gap-4 mb-3">
-                  <span className="text-[10px] font-bold px-3 py-1 bg-slate-100 text-slate-600 rounded-md uppercase tracking-wider">Best Channel</span>
+                  <span className="text-[10px] font-bold px-3 py-1 bg-slate-100 text-slate-600 rounded hover:bg-slate-200 transition-colors duration-200-md uppercase tracking-wider">Best Channel</span>
                   <h3 className="text-xl font-bold text-slate-900">{marketing.bestChannel}</h3>
                 </div>
                 <p className="text-sm text-slate-600">
@@ -796,7 +935,7 @@ export default function ResultsPage() {
                   <h4 className="text-sm font-bold text-blue-400 uppercase tracking-widest mb-6 text-center">SNS Strategy</h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {marketing.snsStrategy.map((sns, i) => (
-                      <div key={i} className="bg-white border border-slate-200 rounded-2xl p-6 hover:border-slate-200 transition-all">
+                      <div key={i} className="bg-white border border-slate-200 rounded-2xl p-6 hover:border-slate-300 hover:shadow-md hover:-translate-y-0.5 transition-all duration-300">
                         <div className="flex items-center gap-3 mb-3">
                           <Megaphone className="w-5 h-5 text-blue-500" />
                           <h3 className="font-bold text-slate-900">{sns.platform}</h3>
@@ -823,7 +962,7 @@ export default function ResultsPage() {
               ======================================================================== */}
 
           {/* ====== 9. 나의 강점을 강화하는 방법 ====== */}
-          <section className="mb-12">
+          <section ref={animateOnScroll} className="mb-12">
             <div className="flex flex-col items-center mb-8">
               <span className="text-xs font-bold text-green-500 tracking-widest uppercase mb-2">Enhance</span>
               <h2 className="text-2xl font-bold text-slate-900">
@@ -839,12 +978,12 @@ export default function ResultsPage() {
                 const gradeInfo = GRADE_INFO[item.grade];
                 const roleMessage = theme?.roleMessages?.[role];
                 return (
-                  <div key={item.themeId} className="group relative bg-white border border-slate-200 rounded-2xl p-6 transition-all hover:border-slate-300 hover:shadow-sm">
+                  <div key={item.themeId} className="group relative bg-white border border-slate-200 rounded-2xl p-6 transition-all duration-300 hover:border-slate-300 hover:shadow-sm">
                     
 
                     <div>
                       <div className="flex flex-wrap items-center gap-3 mb-4">
-                        <span className="text-xs font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-600">
+                        <span className="text-xs font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors duration-200">
                           {item.grade}등급
                         </span>
                         <h3 className="font-bold text-slate-900 text-xl">{item.nameKo}</h3>
@@ -879,7 +1018,7 @@ export default function ResultsPage() {
           <Separator className="my-10" />
 
           {/* ====== 10. 나의 약점을 보완하는 방법 ====== */}
-          <section className="mb-12">
+          <section ref={animateOnScroll} className="mb-12">
             <div className="flex flex-col items-center mb-8">
               <span className="text-xs font-bold text-yellow-500 tracking-widest uppercase mb-2">Supplement</span>
               <h2 className="text-2xl font-bold text-slate-900">
@@ -897,7 +1036,7 @@ export default function ResultsPage() {
                 return (
                   <div key={item.themeId} className="bg-white border border-slate-200 rounded-2xl p-6">
                     <div className="flex flex-wrap items-center gap-3 mb-4">
-                      <span className="text-xs font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-600">
+                      <span className="text-xs font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors duration-200">
                         {item.grade}등급
                       </span>
                       <h3 className="font-bold text-slate-900 text-xl">{item.nameKo}</h3>
@@ -936,7 +1075,7 @@ export default function ResultsPage() {
           <Separator className="my-10" />
 
           {/* ====== 11. 리더십 스타일 ====== */}
-          <section className="mb-12">
+          <section ref={animateOnScroll} className="mb-12">
             <div className="flex flex-col items-center mb-8">
               <span className="text-xs font-bold text-blue-500 tracking-widest uppercase mb-2">Leadership</span>
               <h2 className="text-2xl font-bold text-slate-900">리더십 스타일</h2>
@@ -996,7 +1135,7 @@ export default function ResultsPage() {
           <Separator className="my-10" />
 
           {/* ====== 12. 수입 잠재력 ====== */}
-          <section className="mb-12">
+          <section ref={animateOnScroll} className="mb-12">
             <div className="flex flex-col items-center mb-8">
               <span className="text-xs font-bold text-yellow-500 tracking-widest uppercase mb-2">Income Potential</span>
               <h2 className="text-2xl font-bold text-slate-900">수입 잠재력</h2>
@@ -1048,7 +1187,7 @@ export default function ResultsPage() {
                       return (
                       <div key={i} className="relative md:pl-10">
                         <div className={`absolute left-3 w-2.5 h-2.5 rounded-full ${dotColors[i] || 'bg-yellow-300'} border-2 border-white top-2 hidden md:block`} />
-                        <div className="p-5 border border-slate-100 rounded-2xl bg-white hover:border-slate-200 transition-colors">
+                        <div className="p-5 border border-slate-100 rounded-2xl bg-white hover:border-slate-300 hover:shadow-md hover:-translate-y-0.5 transition-all duration-300">
                           <div className="flex items-center gap-3 mb-2">
                             <span className={`text-[10px] font-black px-2.5 py-1 rounded-md ${milestoneColors[i] || 'bg-yellow-300 text-white'} uppercase`}>{ms.stage}</span>
                             <span className="text-sm font-bold text-slate-900">{ms.target}</span>
@@ -1078,7 +1217,7 @@ export default function ResultsPage() {
           {/* ====== 독립 가능성 진단 (CEO 제외) ====== */}
           {independence && (
             <>
-              <section className="mb-12">
+              <section ref={animateOnScroll} className="mb-12">
                 <div className="flex flex-col items-center mb-8">
                   <span className="text-xs font-bold text-violet-500 tracking-widest uppercase mb-2">Independence</span>
                   <h2 className="text-2xl font-bold text-slate-900">{independence.sectionTitle}</h2>
@@ -1112,7 +1251,7 @@ export default function ResultsPage() {
                   <h3 className="text-xl font-bold text-slate-900 text-center mb-8">나에게 맞는 독립 경로</h3>
                   <div className="space-y-4">
                     {independence.bestFitPaths.map((path, i) => (
-                      <div key={i} className="p-6 border border-slate-200 rounded-2xl hover:border-slate-200 hover:bg-slate-50 transition-all">
+                      <div key={i} className="p-6 border border-slate-200 rounded-2xl hover:border-slate-300 hover:bg-slate-50 hover:shadow-md hover:-translate-y-0.5 transition-all duration-300">
                         <div className="flex items-start gap-4">
                           <div className="w-10 h-10 rounded-full bg-violet-500 flex items-center justify-center text-white font-black text-sm shrink-0">
                             {i + 1}
@@ -1156,7 +1295,7 @@ export default function ResultsPage() {
           {/* ====== 13. 아랫사람과의 궁합 (CEO, Manager만 표시) ====== */}
           {(role === 'ceo' || role === 'manager') && (
             <>
-              <section className="mb-12">
+              <section ref={animateOnScroll} className="mb-12">
                 <div className="flex flex-col items-center mb-8">
                   <span className="text-xs font-bold text-violet-500 tracking-widest uppercase mb-2">Hierarchy</span>
                   <h2 className="text-2xl font-bold text-slate-900">아랫사람과의 궁합</h2>
@@ -1184,7 +1323,7 @@ export default function ResultsPage() {
                     { label: 'GROWTH', data: subordinate.growthMatch },
                     { label: 'CHALLENGE', data: subordinate.challengeMatch }
                   ].map((match, idx) => (
-                    <div key={idx} className="bg-white border border-slate-200 rounded-2xl p-6 relative overflow-hidden flex flex-col h-full hover:border-slate-300 transition-all">
+                    <div key={idx} className="bg-white border border-slate-200 rounded-2xl p-6 relative overflow-hidden flex flex-col h-full hover:border-slate-300 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300 hover-shine">
                       <div className={`inline-block px-2.5 py-1 text-[9px] font-black text-white ${match.label === 'BEST' ? 'bg-violet-500' : match.label === 'GROWTH' ? 'bg-violet-400' : 'bg-violet-300'} rounded-md mb-3`}>
                         {match.label}
                       </div>
@@ -1194,7 +1333,7 @@ export default function ResultsPage() {
                       <div className="space-y-4 mt-auto">
                         <div className="flex flex-wrap gap-2">
                           {match.data.comboTypes?.map((ct, j) => (
-                            <span key={j} className="text-[10px] font-bold px-2 py-0.5 bg-slate-100 text-slate-600 rounded">#{ct}</span>
+                            <span key={j} className="text-[10px] font-bold px-2 py-0.5 bg-slate-100 text-slate-600 rounded hover:bg-slate-200 transition-colors duration-200">#{ct}</span>
                           ))}
                         </div>
                         <div className="p-3 bg-violet-50 rounded-xl border border-violet-100">
@@ -1224,7 +1363,7 @@ export default function ResultsPage() {
 
           {/* ====== CEO: 관리자로 진급시켜야 하는 유형 ====== */}
           {role === 'ceo' && ceoPromotion && (
-              <section className="mb-12">
+              <section ref={animateOnScroll} className="mb-12">
                 <div className="flex flex-col items-center mb-8">
                   <span className="text-xs font-bold text-violet-500 tracking-widest uppercase mb-2">Promotion</span>
                   <h2 className="text-2xl font-bold text-slate-900">관리자로 진급시켜야 하는 유형</h2>
@@ -1232,7 +1371,7 @@ export default function ResultsPage() {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
-                  <div className="bg-white border border-slate-100 rounded-2xl p-8 relative">
+                  <div className="bg-white border border-slate-100 rounded-2xl p-8 relative overflow-hidden hover-shine hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300">
                     <div className="inline-block px-2.5 py-1 bg-violet-500 text-[10px] font-black text-white rounded-md tracking-widest uppercase mb-3">Promote</div>
                     <h3 className="text-xl font-bold text-slate-900 mb-2">{ceoPromotion.promoteType.title}</h3>
                     <p className="text-sm text-slate-500 mb-8 leading-relaxed italic">"{ceoPromotion.promoteType.description}"</p>
@@ -1256,7 +1395,7 @@ export default function ResultsPage() {
                     </div>
                   </div>
 
-                  <div className="bg-white border border-slate-100 rounded-2xl p-8 relative">
+                  <div className="bg-white border border-slate-100 rounded-2xl p-8 relative overflow-hidden hover-shine hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300">
                     <div className="inline-block px-2.5 py-1 bg-violet-300 text-[10px] font-black text-white rounded-md tracking-widest uppercase mb-3">Caution</div>
                     <h3 className="text-xl font-bold text-slate-900 mb-2">{ceoPromotion.avoidPromoting.title}</h3>
                     <p className="text-sm text-slate-500 mb-8 leading-relaxed italic">"{ceoPromotion.avoidPromoting.reason}"</p>
@@ -1294,7 +1433,7 @@ export default function ResultsPage() {
 
           {/* ====== 윗사람과의 궁합 (CEO 제외) ====== */}
           {role !== 'ceo' && (
-            <section className="mb-12">
+            <section ref={animateOnScroll} className="mb-12">
               <div className="flex flex-col items-center mb-8">
                 <span className="text-xs font-bold text-violet-500 tracking-widest uppercase mb-2">Relational</span>
                 <h2 className="text-2xl font-bold text-slate-900">윗사람과의 궁합</h2>
@@ -1302,7 +1441,7 @@ export default function ResultsPage() {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <div className="bg-white border border-slate-100 rounded-2xl p-8 relative">
+                <div className="bg-white border border-slate-100 rounded-2xl p-8 relative overflow-hidden hover-shine hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300">
                   <div className="inline-block px-2.5 py-1 bg-violet-500 text-[10px] font-black text-white rounded-md tracking-widest uppercase mb-3">Best</div>
                   <h3 className="text-xl font-bold text-slate-900 mb-2">{boss.bestMatch.type}</h3>
                   <p className="text-sm text-slate-500 leading-relaxed mb-6 italic">"{boss.bestMatch.description}"</p>
@@ -1310,7 +1449,7 @@ export default function ResultsPage() {
                   <div className="space-y-6">
                     <div className="flex flex-wrap gap-2">
                       {boss.bestMatch.comboTypes?.map((ct, j) => (
-                        <span key={j} className="text-[10px] font-bold px-3 py-1 bg-slate-100 text-slate-600 rounded">#{ct}</span>
+                        <span key={j} className="text-[10px] font-bold px-3 py-1 bg-slate-100 text-slate-600 rounded hover:bg-slate-200 transition-colors duration-200">#{ct}</span>
                       ))}
                     </div>
                     <div className="p-4 bg-violet-50 rounded-2xl border border-violet-100">
@@ -1320,7 +1459,7 @@ export default function ResultsPage() {
                   </div>
                 </div>
 
-                <div className="bg-white border border-slate-100 rounded-2xl p-8 relative">
+                <div className="bg-white border border-slate-100 rounded-2xl p-8 relative overflow-hidden hover-shine hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300">
                   <div className="inline-block px-2.5 py-1 bg-violet-300 text-[10px] font-black text-white rounded-md tracking-widest uppercase mb-3">Caution</div>
                   <h3 className="text-xl font-bold text-slate-900 mb-2">{boss.worstMatch.type}</h3>
                   <p className="text-sm text-slate-500 leading-relaxed mb-6 italic">"{boss.worstMatch.description}"</p>
@@ -1328,7 +1467,7 @@ export default function ResultsPage() {
                   <div className="space-y-6">
                     <div className="flex flex-wrap gap-2">
                       {boss.worstMatch.comboTypes?.map((ct, j) => (
-                        <span key={j} className="text-[10px] font-bold px-3 py-1 bg-slate-100 text-slate-500 rounded">#{ct}</span>
+                        <span key={j} className="text-[10px] font-bold px-3 py-1 bg-slate-100 text-slate-500 rounded hover:bg-slate-200 transition-colors duration-200">#{ct}</span>
                       ))}
                     </div>
                     <div className="p-4 bg-violet-50 rounded-2xl border border-violet-100">
@@ -1344,7 +1483,7 @@ export default function ResultsPage() {
           <Separator className="my-10" />
 
           {/* ====== 9. 번아웃 트리거 ====== */}
-          <section className="mb-12">
+          <section ref={animateOnScroll} className="mb-12">
             <div className="flex flex-col items-center mb-8">
               <span className="text-xs font-bold text-yellow-500 tracking-widest uppercase mb-2">Wellbeing</span>
               <h2 className="text-2xl font-bold text-slate-900">번아웃 트리거</h2>
@@ -1435,7 +1574,7 @@ export default function ResultsPage() {
           <Separator className="my-10" />
 
           {/* ====== 10. 에너지 충전·방전 ====== */}
-          <section className="mb-12">
+          <section ref={animateOnScroll} className="mb-12">
             <div className="flex flex-col items-center mb-8">
               <span className="text-xs font-bold text-green-500 tracking-widest uppercase mb-2">Energy</span>
               <h2 className="text-2xl font-bold text-slate-900">에너지 충전·방전</h2>
@@ -1443,7 +1582,7 @@ export default function ResultsPage() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
-              <div className="bg-white border border-slate-200 rounded-2xl p-8 relative overflow-hidden transition-all hover:border-slate-300">
+              <div className="bg-white border border-slate-200 rounded-2xl p-8 relative overflow-hidden transition-all duration-300 hover:border-slate-300">
                 
                 <h3 className="font-bold text-green-400 uppercase tracking-widest text-sm mb-6 flex items-center gap-2">
                    Charging
@@ -1458,7 +1597,7 @@ export default function ResultsPage() {
                 </ul>
               </div>
 
-              <div className="bg-white border border-slate-200 rounded-2xl p-8 relative overflow-hidden transition-all hover:border-slate-300">
+              <div className="bg-white border border-slate-200 rounded-2xl p-8 relative overflow-hidden transition-all duration-300 hover:border-slate-300">
                 
                 <h3 className="font-black text-green-300 uppercase tracking-widest text-sm mb-6 flex items-center gap-2">
                    Draining
@@ -1483,7 +1622,7 @@ export default function ResultsPage() {
           <Separator className="my-10" />
 
           {/* ====== 11. 맞는 업무 유형 ====== */}
-          <section className="mb-12">
+          <section ref={animateOnScroll} className="mb-12">
             <div className="flex flex-col items-center mb-8">
               <span className="text-xs font-bold text-violet-500 tracking-widest uppercase mb-2">Work Styles</span>
               <h2 className="text-2xl font-bold text-slate-900">맞는 업무 유형</h2>
@@ -1492,7 +1631,7 @@ export default function ResultsPage() {
 
             <div className="space-y-4 mb-8">
               {workType.bestFit.map((item, i) => (
-                <div key={i} className="bg-white border border-slate-200 rounded-2xl p-6 transition-all hover:border-slate-200 hover:bg-slate-50">
+                <div key={i} className="bg-white border border-slate-200 rounded-2xl p-6 hover:border-slate-300 hover:bg-slate-50 hover:shadow-md hover:-translate-y-0.5 transition-all duration-300">
                   <div className="flex items-start gap-4">
                     <CheckCircle className="w-5 h-5 text-violet-500 mt-0.5 shrink-0" />
                     <div>
@@ -1518,7 +1657,7 @@ export default function ResultsPage() {
           <Separator className="my-10" />
 
           {/* ====== 12. 역할별 고유 분석 ====== */}
-          <section className="mb-12">
+          <section ref={animateOnScroll} className="mb-12">
             <div className="flex flex-col items-center mb-8">
               <span className="text-xs font-bold text-violet-500 tracking-widest uppercase mb-2">Analysis</span>
               <h2 className="text-2xl font-bold text-slate-900">역할별 고유 분석</h2>
@@ -1557,7 +1696,7 @@ export default function ResultsPage() {
 
             <div className="grid grid-cols-1 gap-6">
               {[roleCategories.result11, roleCategories.result12, roleCategories.result13].map((cat, i) => (
-                <div key={i} className="bg-white border border-slate-200 rounded-2xl p-8 transition-all hover:border-slate-200 hover:bg-slate-50">
+                <div key={i} className="bg-white border border-slate-200 rounded-2xl p-8 hover:border-slate-300 hover:bg-slate-50 hover:shadow-md hover:-translate-y-0.5 transition-all duration-300">
                   <h3 className="text-xl font-bold text-slate-900 mb-1">{cat.title}</h3>
                   <p className="text-[10px] font-bold text-violet-500 uppercase tracking-widest mb-6">{cat.description}</p>
                   
@@ -1582,7 +1721,7 @@ export default function ResultsPage() {
           <Separator className="my-10" />
 
           {/* ====== 13. 커리어 로드맵 ====== */}
-          <section className="mb-12">
+          <section ref={animateOnScroll} className="mb-12">
             <div className="flex flex-col items-center mb-8">
               <span className="text-xs font-bold text-green-500 tracking-widest uppercase mb-2">Roadmap</span>
               <h2 className="text-2xl font-bold text-slate-900">커리어 로드맵</h2>
@@ -1614,7 +1753,7 @@ export default function ResultsPage() {
                     <div className="absolute left-0 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-green-500 border-2 border-green-500 flex items-center justify-center font-black text-white text-sm hidden md:flex">
                       {i + 1}
                     </div>
-                    <div className="flex-1 bg-white rounded-2xl p-6 border border-slate-200 hover:border-slate-200 hover:bg-slate-50/10 transition-all">
+                    <div className="flex-1 bg-white rounded-2xl p-6 border border-slate-200 hover:border-slate-300 hover:bg-slate-50 hover:shadow-md hover:-translate-y-0.5 transition-all duration-300">
                       <div className="flex items-center gap-3 mb-2">
                         <h3 className="font-bold text-slate-900 text-lg">{step.step}</h3>
                         <span className="text-[10px] font-bold px-2 py-0.5 bg-slate-100 text-slate-500 rounded uppercase">{step.timeframe}</span>
@@ -1630,7 +1769,7 @@ export default function ResultsPage() {
           <Separator className="my-10" />
 
           {/* ====== 15. 이번 달 실천 미션 3가지 ====== */}
-          <section className="mb-12">
+          <section ref={animateOnScroll} className="mb-12">
             <div className="flex flex-col items-center mb-8">
               <span className="text-xs font-bold text-yellow-500 tracking-widest uppercase mb-2">Monthly Missions</span>
               <h2 className="text-2xl font-bold text-slate-900">이번 달 실천 미션</h2>
@@ -1640,7 +1779,7 @@ export default function ResultsPage() {
 
             <div className="space-y-6 mb-8">
               {missions.missions.map((m, i) => (
-                <div key={i} className="bg-white border border-slate-200 rounded-2xl p-8 relative overflow-hidden hover:border-slate-200 transition-all">
+                <div key={i} className="bg-white border border-slate-200 rounded-2xl p-8 relative overflow-hidden hover:border-slate-300 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300 hover-shine">
                   <div className="flex items-start gap-5">
                     <div className="w-12 h-12 rounded-2xl bg-yellow-500 flex items-center justify-center text-white font-black text-lg shrink-0">
                       {i + 1}
@@ -1671,16 +1810,20 @@ export default function ResultsPage() {
           <div className="flex flex-col items-center gap-4 no-print">
             <Button
               onClick={handlePdfDownload}
-              className="w-full sm:w-auto px-10 py-7 rounded-2xl bg-slate-900 text-white hover:bg-yellow-500 transition-all font-bold text-base shadow-lg"
+              disabled={isGenerating}
+              className="w-full sm:w-auto px-10 py-7 rounded-2xl bg-slate-900 text-white hover:bg-yellow-500 hover:shadow-xl hover:shadow-yellow-500/25 hover:scale-105 transition-all duration-300 font-bold text-base shadow-lg animate-pulse-glow disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <FileDown className="w-5 h-5 mr-2" />
-              결과 PDF 다운로드
+              {isGenerating ? (
+                <><Loader2 className="w-5 h-5 mr-2 animate-spin" />PDF 생성 중...</>
+              ) : (
+                <><FileDown className="w-5 h-5 mr-2" />결과 PDF 다운로드</>
+              )}
             </Button>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <Button
                 variant="outline"
                 onClick={handleRestart}
-                className="px-8 py-6 rounded-2xl border-slate-200 text-slate-600 hover:bg-slate-50 transition-all font-bold"
+                className="px-8 py-6 rounded-2xl border-slate-200 text-slate-600 hover:bg-slate-50 hover:border-slate-300 hover:shadow-md hover:scale-105 transition-all duration-300 font-bold"
               >
                 <RotateCcw className="w-4 h-4 mr-2" />
                 다시 검사하기
@@ -1688,7 +1831,7 @@ export default function ResultsPage() {
               <Link href="/">
                 <Button
                   variant="outline"
-                  className="px-8 py-6 rounded-2xl border-slate-800 bg-yellow-500 text-white hover:bg-slate-700 transition-all font-bold shadow-lg shadow-slate-200"
+                  className="px-8 py-6 rounded-2xl border-slate-800 bg-yellow-500 text-white hover:bg-slate-700 hover:shadow-xl hover:scale-105 transition-all duration-300 font-bold shadow-lg shadow-slate-200 animate-pulse-glow"
                 >
                   <Home className="w-4 h-4 mr-2" />
                   처음으로
@@ -1696,7 +1839,7 @@ export default function ResultsPage() {
               </Link>
             </div>
 
-            <div className="mt-8 p-4 rounded-xl bg-slate-100 text-center">
+            <div className="mt-8 p-4 rounded-xl bg-slate-100 text-center animate-fade-in-up">
               <p className="text-xs text-slate-400">
                 이 페이지를 벗어나면 검사 결과가 사라집니다. PDF를 다운로드하여 저장해 주세요.
               </p>
@@ -1723,6 +1866,16 @@ export default function ResultsPage() {
           leadershipTypeId={leadership.primaryType}
         />
       </div>
+
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 no-print animate-fade-in-up">
+          <div className="bg-slate-900 text-white text-sm font-medium px-6 py-3 rounded-full shadow-2xl flex items-center gap-2">
+            <Check className="w-4 h-4 text-green-400 shrink-0" />
+            {toastMessage}
+          </div>
+        </div>
+      )}
     </main>
   );
 }

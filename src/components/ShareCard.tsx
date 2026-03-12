@@ -236,12 +236,16 @@ const ShareCard = forwardRef<HTMLDivElement, ShareCardProps>(
             style={{
               display: "flex",
               justifyContent: "center",
-              gap: "32px",
               alignItems: "center",
+              backgroundColor: "#ffffff",
+              borderRadius: "16px",
+              padding: "12px 32px",
+              boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
             }}
           >
-            <p style={{ fontSize: "20px", color: "#111827", margin: 0 }}>
-              나도 검사하기 &rarr; fitmindlab.vercel.app
+            <p style={{ fontSize: "24px", color: "#374151", margin: 0, fontWeight: 600, letterSpacing: "0.5px" }}>
+              나도 검사하기 &rarr;{" "}
+              <span style={{ color: "#7C3AED", fontWeight: 700 }}>fitmindlab.vercel.app</span>
             </p>
           </div>
         </div>

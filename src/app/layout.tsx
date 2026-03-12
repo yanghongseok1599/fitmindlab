@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Noto_Sans_KR } from "next/font/google";
+import Script from "next/script";
 import "./globals.css";
 import Providers from "@/components/Providers";
 
@@ -89,6 +90,12 @@ export default function RootLayout({
     <html lang="ko">
       <body className={`${notoSansKr.variable} font-sans antialiased`}>
         <Providers>{children}</Providers>
+        <Script
+          src="https://t1.kakaocdn.net/kakao_js_sdk/2.7.4/kakao.min.js"
+          integrity="sha384-DKYJZ8NLiK8MN4/C5P2dtSmLQ4KwPaoqAfyA/DfmEc1VDxu4yyC7wy6K1Ber6ja"
+          crossOrigin="anonymous"
+          strategy="lazyOnload"
+        />
       </body>
     </html>
   );
